@@ -11,7 +11,7 @@ from extensions.edge_tts import tts_preprocessor
 
 params = {
     'activate': True,
-    'voice': 'en-US-JennyNeural',
+    'voice': 'en-US-AriaNeural',
     'show_text': False,
     'autoplay': True,
     'rate': '+0%',
