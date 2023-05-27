@@ -11,30 +11,22 @@ from extensions.edge_tts import tts_preprocessor
 
 params = {
     'activate': True,
-    'speaker': 'en-US-JennyNeural',
+    'voice': 'en-US-JennyNeural',
     'show_text': False,
     'autoplay': True,
-    'voice_speed': 'medium',
+    'rate': '+0%',
     'local_cache_path': ''  # User can override the default cache path to something other via settings.json
 }
 
-
 current_params = params.copy()
 voices = [i["ShortName"] for i in asyncio.run(edge_tts.list_voices())]
-voice_speeds = ['x-slow', 'slow', 'medium', 'fast', 'x-fast']
-
-# Used for making text xml compatible, needed for voice pitch and speed control
-table = str.maketrans({
-    "<": "&lt;",
-    ">": "&gt;",
-    "&": "&amp;",
-    "'": "&apos;",
-    '"': "&quot;",
-})
-
-
-def xmlesc(txt):
-    return txt.translate(table)
+voice_speeds = {
+    'x-slow': "-50%",
+    'slow': "-25%",
+    'medium': "+0%",
+    'fast': "+25%",
+    'x-fast': "+50%"
+}
 
 
 def remove_tts_from_history():
@@ -99,7 +91,7 @@ def output_modifier(string):
     else:
         output_file = Path(f'extensions/edge_tts/outputs/{shared.character}_{int(time.time())}.mp3')
         
-        communicate = edge_tts.Communicate(string, params['speaker'])
+        communicate = edge_tts.Communicate(string, params['voice'], rate=params["rate"])
         asyncio.run(communicate.save(str(output_file)))
         autoplay = 'autoplay' if params['autoplay'] else ''
         string = f'<audio src="file/{output_file.as_posix()}" controls {autoplay}></audio>'
@@ -125,7 +117,7 @@ async def voice_preview(preview_text):
     string = tts_preprocessor.preprocess(preview_text)
 
     output_file = Path('extensions/edge_tts/outputs/voice_preview.wav')
-    communicate = edge_tts.Communicate(string, params['speaker'])
+    communicate = edge_tts.Communicate(string, params['voice'], rate=params["rate"])
     await communicate.save(str(output_file))
 
     return f'<audio src="file/{output_file.as_posix()}?{int(time.time())}" controls autoplay></audio>'
@@ -133,15 +125,15 @@ async def voice_preview(preview_text):
 
 def ui():
     # Gradio elements
-    with gr.Accordion("Silero TTS"):
+    with gr.Accordion("Edge TTS"):
         with gr.Row():
             activate = gr.Checkbox(value=params['activate'], label='Activate TTS')
             autoplay = gr.Checkbox(value=params['autoplay'], label='Play TTS automatically')
 
         show_text = gr.Checkbox(value=params['show_text'], label='Show message text under audio player')
         with gr.Row():
-            voice = gr.Dropdown(value=params['speaker'], choices=sorted(voices), label='TTS voice')
-            v_speed = gr.Dropdown(value=params['voice_speed'], choices=voice_speeds, label='Voice speed')
+            voice = gr.Dropdown(value=params['voice'], choices=sorted(voices), label='TTS voice')
+            v_speed = gr.Dropdown(value="medium", choices=voice_speeds.keys(), label='Voice speed')
 
         with gr.Row():
             convert = gr.Button('Permanently replace audios with the message texts')
@@ -149,7 +141,7 @@ def ui():
             convert_confirm = gr.Button('Confirm (cannot be undone)', variant="stop", visible=False)
 
         with gr.Row():
-            preview_text = gr.Text(show_label=False, placeholder="Preview text", elem_id="silero_preview_text")
+            preview_text = gr.Text(show_label=False, placeholder="Preview text", elem_id="edge_preview_text")
             preview_play = gr.Button("Preview")
             preview_audio = gr.HTML(visible=False)
 
@@ -174,8 +166,8 @@ def ui():
     # Event functions to update the parameters in the backend
     activate.change(lambda x: params.update({"activate": x}), activate, None)
     autoplay.change(lambda x: params.update({"autoplay": x}), autoplay, None)
-    voice.change(lambda x: params.update({"speaker": x}), voice, None)
-    v_speed.change(lambda x: params.update({"voice_speed": x}), v_speed, None)
+    voice.change(lambda x: params.update({"voice": x}), voice, None)
+    v_speed.change(lambda x: params.update({"rate": voice_speeds[x]}), v_speed, None)
 
     # Play preview
     preview_text.submit(voice_preview, preview_text, preview_audio)

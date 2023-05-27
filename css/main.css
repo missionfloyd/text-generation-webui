@@ -114,3 +114,8 @@ button {
 .small-button {
     max-width: 171px;
 }
+
+/* edge_tts preview */
+.form:has(> #edge_preview_text) {
+    min-width: 75%
+}
