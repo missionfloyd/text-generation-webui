@@ -7,7 +7,7 @@ HOST = 'localhost:5000'
 URI = f'http://{HOST}/api/v1/chat'
 
 # For reverse-proxied streaming, the remote will likely host with ssl - https://
-# URI = 'https://your-uri-here.trycloudflare.com/api/v1/generate'
+# URI = 'https://your-uri-here.trycloudflare.com/api/v1/chat'
 
 
 def run(user_input, history):
@@ -33,6 +33,8 @@ def run(user_input, history):
         'typical_p': 1,
         'epsilon_cutoff': 0,  # In units of 1e-4
         'eta_cutoff': 0,  # In units of 1e-4
+        'tfs': 1,
+        'top_a': 0,
         'repetition_penalty': 1.18,
         'top_k': 40,
         'min_length': 0,

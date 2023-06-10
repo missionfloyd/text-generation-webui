@@ -1,7 +1,6 @@
 import ast
 import random
 import re
-import threading
 import time
 import traceback
 
@@ -28,11 +27,7 @@ def generate_reply(*args, **kwargs):
 
 
 def get_max_prompt_length(state):
-    max_length = state['truncation_length'] - state['max_new_tokens']
-    if shared.soft_prompt:
-        max_length -= shared.soft_prompt_tensor.shape[1]
-
-    return max_length
+    return state['truncation_length'] - state['max_new_tokens']
 
 
 def encode(prompt, add_special_tokens=True, add_bos_token=True, truncation_length=None):
@@ -79,14 +74,6 @@ def get_encoded_length(prompt):
 
 def decode(output_ids, skip_special_tokens=True):
     return shared.tokenizer.decode(output_ids, skip_special_tokens)
-
-
-def generate_softprompt_input_tensors(input_ids):
-    inputs_embeds = shared.model.transformer.wte(input_ids)
-    inputs_embeds = torch.cat((shared.soft_prompt_tensor, inputs_embeds), dim=1)
-    filler_input_ids = torch.zeros((1, inputs_embeds.shape[1]), dtype=input_ids.dtype).to(shared.model.device)
-    # filler_input_ids += shared.model.config.bos_token_id # setting dummy input_ids to bos tokens
-    return inputs_embeds, filler_input_ids
 
 
 # Removes empty replies from gpt4chan outputs
@@ -167,7 +154,7 @@ def _generate_reply(question, state, eos_token=None, stopping_strings=None, is_c
     if generate_func is None:
         if shared.model_name == 'None' or shared.model is None:
             logger.error("No model is loaded! Select one in the Model tab.")
-            yield question
+            yield ''
             return
 
         if shared.model_type in ['rwkv', 'llamacpp']:
@@ -188,13 +175,25 @@ def _generate_reply(question, state, eos_token=None, stopping_strings=None, is_c
     shared.stop_everything = False
     clear_torch_cache()
     seed = set_manual_seed(state['seed'])
+    is_stream = state['stream']
+    last_update = -1
+    reply = ''
     for reply in generate_func(question, original_question, seed, state, eos_token, stopping_strings, is_chat=is_chat):
+        if is_stream:
+            cur_time = time.time()
+            if cur_time - last_update > 0.041666666666666664:  # Limit streaming to 24 fps
+                last_update = cur_time
+                yield reply
+        else:
+            yield reply
+
+    if is_stream:
         yield reply
 
 
 def generate_reply_HF(question, original_question, seed, state, eos_token=None, stopping_strings=None, is_chat=False):
     generate_params = {}
-    for k in ['max_new_tokens', 'do_sample', 'temperature', 'top_p', 'typical_p', 'repetition_penalty', 'encoder_repetition_penalty', 'top_k', 'min_length', 'no_repeat_ngram_size', 'num_beams', 'penalty_alpha', 'length_penalty', 'early_stopping']:
+    for k in ['max_new_tokens', 'do_sample', 'temperature', 'top_p', 'typical_p', 'repetition_penalty', 'encoder_repetition_penalty', 'top_k', 'min_length', 'no_repeat_ngram_size', 'num_beams', 'penalty_alpha', 'length_penalty', 'early_stopping', 'tfs', 'top_a']:
         generate_params[k] = state[k]
 
     for k in ['epsilon_cutoff', 'eta_cutoff']:
@@ -221,18 +220,11 @@ def generate_reply_HF(question, original_question, seed, state, eos_token=None, 
         eos_token_ids.append(int(encode(eos_token)[0][-1]))
 
     # Add the encoded tokens to generate_params
-    if shared.soft_prompt:
-        inputs_embeds, filler_input_ids = generate_softprompt_input_tensors(input_ids)
-        question, filler_input_ids, inputs_embeds = apply_extensions('tokenizer', state, question, filler_input_ids, inputs_embeds)
-        original_input_ids = input_ids
+    question, input_ids, inputs_embeds = apply_extensions('tokenizer', state, question, input_ids, None)
+    original_input_ids = input_ids
+    generate_params.update({'inputs': input_ids})
+    if inputs_embeds is not None:
         generate_params.update({'inputs_embeds': inputs_embeds})
-        generate_params.update({'inputs': filler_input_ids})
-    else:
-        question, input_ids, inputs_embeds = apply_extensions('tokenizer', state, question, input_ids, None)
-        original_input_ids = input_ids
-        generate_params.update({'inputs': input_ids})
-        if inputs_embeds is not None:
-            generate_params.update({'inputs_embeds': inputs_embeds})
 
     # Create the StoppingCriteriaList with the stopping strings (needs to be done after tokenizer extensions)
     stopping_criteria_list = transformers.StoppingCriteriaList()
@@ -258,9 +250,6 @@ def generate_reply_HF(question, original_question, seed, state, eos_token=None, 
                 if cuda:
                     output = output.cuda()
 
-            if shared.soft_prompt:
-                output = torch.cat((input_ids[0], output[filler_input_ids.shape[1]:]))
-
             yield get_reply_from_output_ids(output, input_ids, original_question, state, is_chat=is_chat)
 
         # Stream the reply 1 token at a time.
@@ -278,9 +267,6 @@ def generate_reply_HF(question, original_question, seed, state, eos_token=None, 
 
             with generate_with_streaming(**generate_params) as generator:
                 for output in generator:
-                    if shared.soft_prompt:
-                        output = torch.cat((input_ids[0], output[filler_input_ids.shape[1]:]))
-
                     yield get_reply_from_output_ids(output, input_ids, original_question, state, is_chat=is_chat)
                     if output[-1] in eos_token_ids:
                         break
